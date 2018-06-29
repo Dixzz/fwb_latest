@@ -15,13 +15,18 @@
  */
 package com.android.systemui.statusbar.policy;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.res.Resources;
 import android.database.ContentObserver;
 import android.net.NetworkCapabilities;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings.Global;
+import android.telephony.ims.ImsReasonInfo;
+import android.telephony.ims.stub.ImsRegistrationImplBase;
 import android.telephony.PhoneStateListener;
 import android.telephony.ServiceState;
 import android.telephony.SignalStrength;
@@ -32,6 +37,8 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.SparseArray;
 
+import com.android.ims.ImsException;
+import com.android.ims.ImsManager;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.TelephonyIntents;
 import com.android.internal.telephony.cdma.EriInfo;
@@ -72,6 +79,21 @@ public class MobileSignalController extends SignalController<
     private MobileIconGroup mDefaultIcons;
     private Config mConfig;
 
+    private boolean mAlwasyShowTypeIcon = false;
+    private boolean mShowIconGForCDMA_1x = false;
+    private boolean mHideNoInternetState = false;
+    private int mCallState = TelephonyManager.CALL_STATE_IDLE;
+
+    /****************************5G****************************/
+    private FiveGStateListener mFiveGStateListener;
+    private MobileState mFiveGState;
+    private final int NUM_LEVELS_ON_5G;
+    /**********************************************************/
+
+    private ImsManager mImsManager;
+    private boolean mImsResitered;
+    private final boolean mShowVolteIcon;
+
     // TODO: Reduce number of vars passed in, if we have the NetworkController, probably don't
     // need listener lists anymore.
     public MobileSignalController(Context context, Config config, boolean hasMobileData,
@@ -92,6 +114,11 @@ public class MobileSignalController extends SignalController<
         mNetworkNameDefault = getStringIfExists(
                 com.android.internal.R.string.lockscreen_carrier_default);
 
+        mAlwasyShowTypeIcon = context.getResources().getBoolean(R.bool.config_alwaysShowTypeIcon);
+        mShowIconGForCDMA_1x = context.getResources().getBoolean(R.bool.config_showIconGforCDMA_1X);
+	mHideNoInternetState = context.getResources().getBoolean(R.bool.config_hideNoInternetState);
+        mShowVolteIcon = context.getResources().getBoolean(R.bool.config_display_volte);
+
         mapIconSets();
 
         String networkName = info.getCarrierName() != null ? info.getCarrierName().toString()
@@ -102,6 +129,13 @@ public class MobileSignalController extends SignalController<
         mLastState.iconGroup = mCurrentState.iconGroup = mDefaultIcons;
         // Get initial data sim state.
         updateDataSim();
+
+        mFiveGState = cleanState();
+        NUM_LEVELS_ON_5G = FiveGServiceClient.getNumLevels(mContext);
+
+        int phoneId = SubscriptionManager.getPhoneId(mSubscriptionInfo.getSubscriptionId());
+        mImsManager = ImsManager.getInstance(mContext, phoneId);
+
         mObserver = new ContentObserver(new Handler(receiverLooper)) {
             @Override
             public void onChange(boolean selfChange) {
@@ -160,6 +194,13 @@ public class MobileSignalController extends SignalController<
         mContext.getContentResolver().registerContentObserver(Global.getUriFor(
                 Global.MOBILE_DATA + mSubscriptionInfo.getSubscriptionId()),
                 true, mObserver);
+        try {
+            mImsManager.addRegistrationCallback(mImsRegistrationCallback);
+        }catch(ImsException e){
+            Log.d(mTag, "exception:" + e);
+        }
+        mContext.registerReceiver(mVolteSwitchObserver,
+                new IntentFilter("org.codeaurora.intent.action.ACTION_ENHANCE_4G_SWITCH"));
     }
 
     /**
@@ -168,6 +209,7 @@ public class MobileSignalController extends SignalController<
     public void unregisterListener() {
         mPhone.listen(mPhoneStateListener, 0);
         mContext.getContentResolver().unregisterContentObserver(mObserver);
+        mContext.unregisterReceiver(mVolteSwitchObserver);
     }
 
     /**
@@ -274,6 +316,26 @@ public class MobileSignalController extends SignalController<
         return getCurrentIconId();
     }
 
+    private boolean isEnhanced4gLteModeSettingEnabled() {
+        return mImsManager.isEnhanced4gLteModeSettingEnabledByUser()
+                && mImsManager.isNonTtyOrTtyOnVolteEnabled();
+    }
+
+    private int getVolteResId() {
+        int resId = 0;
+        int voiceNetTye = getVoiceNetworkType();
+
+        if ( mImsResitered ) {
+            resId = R.drawable.ic_volte;
+        }else if ( mDataNetType == TelephonyManager.NETWORK_TYPE_LTE
+                    || mDataNetType == TelephonyManager.NETWORK_TYPE_LTE_CA
+                    || voiceNetTye  == TelephonyManager.NETWORK_TYPE_LTE
+                    || voiceNetTye  == TelephonyManager.NETWORK_TYPE_LTE_CA) {
+            resId = R.drawable.ic_volte_no_voice;
+        }
+        return resId;
+    }
+
     @Override
     public void notifyListeners(SignalCallback callback) {
         MobileIconGroup icons = getIcons();
@@ -308,10 +370,29 @@ public class MobileSignalController extends SignalController<
                 && !mCurrentState.carrierNetworkChangeMode
                 && mCurrentState.activityOut;
         showDataIcon &= mCurrentState.isDefault || dataDisabled;
-        int typeIcon = (showDataIcon || mConfig.alwaysShowDataRatIcon) ? icons.mDataType : 0;
+        int typeIcon = (showDataIcon || mConfig.alwaysShowDataRatIcon || mAlwasyShowTypeIcon) ?
+                icons.mDataType : 0;
+        int volteIcon = mShowVolteIcon && isEnhanced4gLteModeSettingEnabled() ? getVolteResId() : 0;
+
+        if (DEBUG) {
+            Log.d(mTag, "notifyListeners mAlwasyShowTypeIcon=" + mAlwasyShowTypeIcon
+                    + "  mDataNetType:" + mDataNetType +
+                    "/" + TelephonyManager.getNetworkTypeName(mDataNetType)
+                    + " voiceNetType=" + getVoiceNetworkType() + "/"
+                    + TelephonyManager.getNetworkTypeName(getVoiceNetworkType())
+                    + " showDataIcon=" + showDataIcon
+                    + " mConfig.alwaysShowDataRatIcon=" + mConfig.alwaysShowDataRatIcon
+                    + " icons.mDataType=" + icons.mDataType
+                    + " mShowVolteIcon=" + mShowVolteIcon
+                    + " isEnhanced4gLteModeSettingEnabled=" + isEnhanced4gLteModeSettingEnabled()
+                    + " volteIcon=" + volteIcon);
+        }
         callback.setMobileDataIndicators(statusIcon, qsIcon, typeIcon, qsTypeIcon,
-                activityIn, activityOut, dataContentDescription, description, icons.mIsWide,
-                mSubscriptionInfo.getSubscriptionId(), mCurrentState.roaming);
+                activityIn, activityOut, 0,
+                0, volteIcon,
+                dataContentDescription, description, icons.mIsWide,
+                mSubscriptionInfo.getSubscriptionId(), mCurrentState.roaming,
+                mFiveGState.connected, getCurrentFiveGIconId(), mFiveGState.dataConnected);
     }
 
     @Override
@@ -570,6 +651,56 @@ public class MobileSignalController extends SignalController<
             mCurrentState.carrierNetworkChangeMode = active;
 
             updateTelephony();
+        }
+    };
+
+    class FiveGStateListener implements IFiveGStateListener{
+
+        public void onStateChanged(FiveGServiceState state) {
+            if (DEBUG) {
+                Log.d(mTag, "onStateChanged: state=" + state);
+            }
+
+            mFiveGState.connected = state.isServiceAvailable();
+            mFiveGState.level = state.getLevel();
+            mFiveGState.dataConnected = state.isDataConnected();
+            mFiveGState.time = System.currentTimeMillis();
+
+            notifyListeners();
+
+        }
+    }
+
+    private final ImsRegistrationImplBase.Callback mImsRegistrationCallback =
+            new ImsRegistrationImplBase.Callback() {
+                @Override
+                public void onRegistered(
+                        @ImsRegistrationImplBase.ImsRegistrationTech int imsRadioTech) {
+                    Log.d(mTag, "onRegistered imsRadioTech=" + imsRadioTech);
+                    mImsResitered = true;
+                    notifyListeners();
+                }
+
+                @Override
+                public void onRegistering(
+                        @ImsRegistrationImplBase.ImsRegistrationTech int imsRadioTech) {
+                    Log.d(mTag, "onRegistering imsRadioTech=" + imsRadioTech);
+                    mImsResitered = false;
+                    notifyListeners();
+                }
+
+                @Override
+                public void onDeregistered(ImsReasonInfo imsReasonInfo) {
+                    Log.d(mTag, "onDeregistered imsReasonInfo=" + imsReasonInfo);
+                    mImsResitered = false;
+                    notifyListeners();
+                }
+            };
+
+    private final BroadcastReceiver mVolteSwitchObserver = new BroadcastReceiver() {
+        public void onReceive(Context context, Intent intent) {
+            Log.d(mTag, "action=" + intent.getAction());
+            notifyListeners();
         }
     };
 
