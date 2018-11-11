@@ -4711,12 +4711,6 @@ public final class Settings {
         public static final String SCREENSHOT_DEFAULT_MODE = "screenshot_default_mode";
 
         /**
-         * Whether to show VoLTE icon or not
-         * @hide
-         */
-        public static final String SHOW_VOLTE_ICON = "volte_icon";
-
-        /**
          * Sensor block per-package
          * @hide
          */
