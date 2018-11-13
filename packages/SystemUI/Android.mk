@@ -58,8 +58,7 @@ LOCAL_STATIC_JAVA_LIBRARIES := \
 
 LOCAL_JAVA_LIBRARIES := telephony-common \
     android.car \
-    ims-common \
-    qtiNetworkLib
+    ims-common 
 
 LOCAL_PACKAGE_NAME := SystemUI
 LOCAL_PRIVATE_PLATFORM_APIS := true

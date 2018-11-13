@@ -17,7 +17,6 @@ package com.android.systemui.statusbar.policy;
 
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.Resources;
 import android.database.ContentObserver;
 import android.net.NetworkCapabilities;
 import android.os.Handler;
@@ -73,17 +72,6 @@ public class MobileSignalController extends SignalController<
     private MobileIconGroup mDefaultIcons;
     private Config mConfig;
 
-    private boolean mAlwasyShowTypeIcon = false;
-    private boolean mShowIconGForCDMA_1x = false;
-    private boolean mHideNoInternetState = false;
-    private int mCallState = TelephonyManager.CALL_STATE_IDLE;
-
-    /****************************5G****************************/
-    private FiveGStateListener mFiveGStateListener;
-    private MobileState mFiveGState;
-    private final int NUM_LEVELS_ON_5G;
-    /**********************************************************/
-
     // TODO: Reduce number of vars passed in, if we have the NetworkController, probably don't
     // need listener lists anymore.
     public MobileSignalController(Context context, Config config, boolean hasMobileData,
@@ -104,9 +92,6 @@ public class MobileSignalController extends SignalController<
         mNetworkNameDefault = getStringIfExists(
                 com.android.internal.R.string.lockscreen_carrier_default);
 
-        mAlwasyShowTypeIcon = context.getResources().getBoolean(R.bool.config_alwaysShowTypeIcon);
-        mShowIconGForCDMA_1x = context.getResources().getBoolean(R.bool.config_showIconGforCDMA_1X);
-        mHideNoInternetState = context.getResources().getBoolean(R.bool.config_hideNoInternetState);
         mapIconSets();
 
         String networkName = info.getCarrierName() != null ? info.getCarrierName().toString()
@@ -117,11 +102,6 @@ public class MobileSignalController extends SignalController<
         mLastState.iconGroup = mCurrentState.iconGroup = mDefaultIcons;
         // Get initial data sim state.
         updateDataSim();
-
-        mFiveGState = cleanState();
-        NUM_LEVELS_ON_5G = FiveGServiceClient.getNumLevels(mContext);
-
-
         mObserver = new ContentObserver(new Handler(receiverLooper)) {
             @Override
             public void onChange(boolean selfChange) {
@@ -328,25 +308,10 @@ public class MobileSignalController extends SignalController<
                 && !mCurrentState.carrierNetworkChangeMode
                 && mCurrentState.activityOut;
         showDataIcon &= mCurrentState.isDefault || dataDisabled;
-        int typeIcon = (showDataIcon || mConfig.alwaysShowDataRatIcon || mAlwasyShowTypeIcon) ?
-                icons.mDataType : 0;
-
-        if (DEBUG) {
-            Log.d(mTag, "notifyListeners mAlwasyShowTypeIcon=" + mAlwasyShowTypeIcon
-                    + "  mDataNetType:" + mDataNetType +
-                    "/" + TelephonyManager.getNetworkTypeName(mDataNetType)
-                    + " voiceNetType=" + getVoiceNetworkType() + "/"
-                    + TelephonyManager.getNetworkTypeName(getVoiceNetworkType())
-                    + " showDataIcon=" + showDataIcon
-                    + " mConfig.alwaysShowDataRatIcon=" + mConfig.alwaysShowDataRatIcon
-                    + " icons.mDataType=" + icons.mDataType);
-        }
+        int typeIcon = (showDataIcon || mConfig.alwaysShowDataRatIcon) ? icons.mDataType : 0;
         callback.setMobileDataIndicators(statusIcon, qsIcon, typeIcon, qsTypeIcon,
-                activityIn, activityOut, 0,
-                icons.mStackedDataIcon, icons.mStackedVoiceIcon,
-                dataContentDescription, description, icons.mIsWide,
-                mSubscriptionInfo.getSubscriptionId(), mCurrentState.roaming,
-                mFiveGState.connected, getCurrentFiveGIconId(), mFiveGState.dataConnected);
+                activityIn, activityOut, dataContentDescription, description, icons.mIsWide,
+                mSubscriptionInfo.getSubscriptionId(), mCurrentState.roaming);
     }
 
     @Override
@@ -608,55 +573,21 @@ public class MobileSignalController extends SignalController<
         }
     };
 
-    class FiveGStateListener implements IFiveGStateListener{
-
-        public void onStateChanged(FiveGServiceState state) {
-            if (DEBUG) {
-                Log.d(mTag, "onStateChanged: state=" + state);
-            }
-
-            mFiveGState.connected = state.isServiceAvailable();
-            mFiveGState.level = state.getLevel();
-            mFiveGState.dataConnected = state.isDataConnected();
-            mFiveGState.time = System.currentTimeMillis();
-
-            notifyListeners();
-
-        }
-    }
-
     static class MobileIconGroup extends SignalController.IconGroup {
         final int mDataContentDescription; // mContentDescriptionDataType
         final int mDataType;
         final boolean mIsWide;
         final int mQsDataType;
-        final int mSingleSignalIcon;
-        final int mStackedDataIcon;
-        final int mStackedVoiceIcon;
-        final int mActivityId;
 
         public MobileIconGroup(String name, int[][] sbIcons, int[][] qsIcons, int[] contentDesc,
                 int sbNullState, int qsNullState, int sbDiscState, int qsDiscState,
                 int discContentDesc, int dataContentDesc, int dataType, boolean isWide) {
-                this(name, sbIcons, qsIcons, contentDesc, sbNullState, qsNullState, sbDiscState,
-                        qsDiscState, discContentDesc, dataContentDesc, dataType, isWide,
-                        0, 0, 0, 0);
-        }
-
-        public MobileIconGroup(String name, int[][] sbIcons, int[][] qsIcons, int[] contentDesc,
-                int sbNullState, int qsNullState, int sbDiscState, int qsDiscState,
-                int discContentDesc, int dataContentDesc, int dataType, boolean isWide,
-                int singleSignalIcon, int stackedDataIcon, int stackedVoicelIcon, int activityId) {
             super(name, sbIcons, qsIcons, contentDesc, sbNullState, qsNullState, sbDiscState,
                     qsDiscState, discContentDesc);
             mDataContentDescription = dataContentDesc;
             mDataType = dataType;
             mIsWide = isWide;
             mQsDataType = dataType; // TODO: remove this field
-            mSingleSignalIcon = singleSignalIcon;
-            mStackedDataIcon = stackedDataIcon;
-            mStackedVoiceIcon = stackedVoicelIcon;
-            mActivityId = activityId;
         }
     }
 
@@ -671,8 +602,6 @@ public class MobileSignalController extends SignalController<
         boolean isDefault;
         boolean userSetup;
         boolean roaming;
-        int dataActivity;
-        int voiceLevel;
 
         @Override
         public void copyFrom(State s) {
@@ -688,8 +617,6 @@ public class MobileSignalController extends SignalController<
             carrierNetworkChangeMode = state.carrierNetworkChangeMode;
             userSetup = state.userSetup;
             roaming = state.roaming;
-            dataActivity = state.dataActivity;
-            voiceLevel = state.voiceLevel;
         }
 
         @Override
@@ -706,9 +633,7 @@ public class MobileSignalController extends SignalController<
             builder.append("airplaneMode=").append(airplaneMode).append(',');
             builder.append("carrierNetworkChangeMode=").append(carrierNetworkChangeMode)
                     .append(',');
-            builder.append("userSetup=").append(userSetup).append(',');
-            builder.append("voiceLevel=").append(voiceLevel).append(',');
-            builder.append("dataActivity=").append(dataActivity);
+            builder.append("userSetup=").append(userSetup);
         }
 
         @Override
@@ -723,9 +648,7 @@ public class MobileSignalController extends SignalController<
                     && ((MobileState) o).carrierNetworkChangeMode == carrierNetworkChangeMode
                     && ((MobileState) o).userSetup == userSetup
                     && ((MobileState) o).isDefault == isDefault
-                    && ((MobileState) o).roaming == roaming
-                    && ((MobileState) o).voiceLevel == voiceLevel
-                    && ((MobileState) o).dataActivity == dataActivity;
+                    && ((MobileState) o).roaming == roaming;
         }
     }
 }

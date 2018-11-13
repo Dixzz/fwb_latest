@@ -165,7 +165,6 @@ public class StatusBarMobileView extends FrameLayout implements DarkReceiver,
         mOut.setVisibility(mState.activityIn ? View.VISIBLE : View.GONE);
         mInoutContainer.setVisibility((mState.activityIn || mState.activityOut)
                 ? View.VISIBLE : View.GONE);
-        mFiveGGroup.setVisibility(View.GONE);
     }
 
     private void updateState(MobileIconState state) {
@@ -192,8 +191,6 @@ public class StatusBarMobileView extends FrameLayout implements DarkReceiver,
         mOut.setVisibility(state.activityIn ? View.VISIBLE : View.GONE);
         mInoutContainer.setVisibility((state.activityIn || state.activityOut)
                 ? View.VISIBLE : View.GONE);
-
-        updateFiveGState(state);
 
         mState = state;
     }

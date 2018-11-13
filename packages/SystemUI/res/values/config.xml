@@ -1,4 +1,4 @@
-<xml version="1.0" encoding="utf-8">
+<?xml version="1.0" encoding="utf-8"?>
 <!--
 /*
 ** Copyright 2009, The Android Open Source Project
@@ -16,7 +16,6 @@
 ** limitations under the License.
 */
 -->
-
 <resources>
     <!-- Whether recents should use hardware layers for its taskviews. This flag can be enabled
     for devices where the java drawing of round rects may be slow -->
@@ -494,17 +493,4 @@
 
     <!-- On debuggable builds, alert the user if SystemUI PSS goes over this number (in kb) -->
     <integer name="watch_heap_limit">256000</integer>
-
-    <!-- Whether to show VoLTE icon in the status bar -->
-    <bool name="config_display_volte">true</bool>
-
-    <!-- Whether or not we always show type icon -->
-    <bool name="config_alwaysShowTypeIcon">false</bool>
-
-    <!-- Whether or not we show G for CDMA/1xRTT -->
-    <bool name="config_showIconGforCDMA_1X">false</bool>
-
-    <!-- Control whether status bar should fetch mobile signal icons from xml file dynamically -->
-    <bool name="config_read_icons_from_xml">false<bool>
-
 </resources>
