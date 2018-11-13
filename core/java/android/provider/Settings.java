@@ -5608,6 +5608,12 @@ public final class Settings {
 
         private static final Validator SHOW_IME_WITH_HARD_KEYBOARD_VALIDATOR = BOOLEAN_VALIDATOR;
 
+	/**
+         * Whether to enable the pixel navbar animation
+         * @hide
+         */
+        public static final String PIXEL_NAV_ANIMATION = "pixel_nav_animation";
+	    
         /**
          * Host name and port for global http proxy. Uses ':' seperator for
          * between host and port.
